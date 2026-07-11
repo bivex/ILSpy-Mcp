@@ -7,7 +7,9 @@ using ILSpy.Mcp.Transport.Mcp.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Server;
+
+// Disable watching the working dir, which is often the project dir
+Environment.SetEnvironmentVariable("DOTNET_hostBuilder:reloadConfigOnChange", "false");
 
 var builder = Host.CreateApplicationBuilder(args);
 
