@@ -1,5 +1,11 @@
 # ILSpy MCP Server
 
+[![NuGet Version](https://img.shields.io/nuget/v/ILSpyMcp.Server.svg?style=flat-square&color=blue)](https://www.nuget.org/packages/ILSpyMcp.Server)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/ILSpyMcp.Server.svg?style=flat-square&color=blue)](https://www.nuget.org/packages/ILSpyMcp.Server)
+[![Framework](https://img.shields.io/badge/.NET-9.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
+[![MCP Protocol](https://img.shields.io/badge/MCP-Standard-0052CC?style=flat-square)](https://modelcontextprotocol.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+
 A Model Context Protocol (MCP) server built on .NET 9 that provides in-memory .NET assembly decompilation and structural analysis capabilities for AI assistants using [ILSpy (`ICSharpCode.Decompiler`)](https://github.com/icsharpcode/ILSpy).
 
 ---
@@ -96,7 +102,9 @@ For best results when analyzing unfamiliar .NET libraries or assemblies, AI assi
 - **.NET 9.0 SDK** or higher
 - An MCP-compatible client (Claude Code, Cursor, Antigravity, Claude Desktop, VS Code, etc.)
 
-### Installation
+---
+
+### Option A: Install from NuGet (Recommended)
 
 Install `ILSpyMcp.Server` globally via NuGet:
 
@@ -104,10 +112,64 @@ Install `ILSpyMcp.Server` globally via NuGet:
 dotnet tool install -g ILSpyMcp.Server
 ```
 
-To update to the latest release:
+To update to the latest release from NuGet:
 
 ```bash
 dotnet tool update -g ILSpyMcp.Server
+```
+
+---
+
+### Option B: Build & Run from Source
+
+Clone the repository and build the project:
+
+```bash
+git clone https://github.com/gentledepp/ILSpy-Mcp.git
+cd ILSpy-Mcp
+dotnet build -c Release
+```
+
+You can then run the built DLL directly in your MCP client settings:
+
+```json
+{
+  "mcpServers": {
+    "ilspy-mcp": {
+      "command": "dotnet",
+      "args": ["/path/to/ILSpy-Mcp/bin/Release/net9.0/ILSpy.Mcp.dll"]
+    }
+  }
+}
+```
+
+---
+
+## 📦 Packaging & Publishing to NuGet
+
+The project is preconfigured as a .NET Global Tool package (`ILSpyMcp.Server`).
+
+### Build & Pack
+Create a `.nupkg` package in Release mode:
+
+```bash
+dotnet pack -c Release -o ./nupkg
+```
+
+### Publish to NuGet.org
+Push the generated package to NuGet.org:
+
+```bash
+dotnet nuget push ./nupkg/ILSpyMcp.Server.*.nupkg \
+  --api-key YOUR_NUGET_API_KEY \
+  --source https://api.nuget.org/v3/index.json
+```
+
+### Install Local Build (Testing)
+Test the locally built package before publishing:
+
+```bash
+dotnet tool install -g --add-source ./nupkg ILSpyMcp.Server
 ```
 
 ---
