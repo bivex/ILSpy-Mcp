@@ -61,6 +61,16 @@ public sealed class DecompileTypeUseCase
         {
             throw;
         }
+        catch (FileNotFoundException ex)
+        {
+            _logger.LogWarning("Assembly file not found: {Assembly}", assemblyPath);
+            throw new AssemblyLoadException(assemblyPath, ex);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Invalid argument for decompiling type {TypeName}: {Message}", typeName, ex.Message);
+            throw new AssemblyLoadException(assemblyPath, ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error decompiling type {TypeName}", typeName);
