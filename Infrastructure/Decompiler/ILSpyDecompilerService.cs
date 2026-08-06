@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.CSharp;
 using ICSharpCode.Decompiler.Metadata;
@@ -14,6 +15,7 @@ namespace ILSpy.Mcp.Infrastructure.Decompiler;
 /// </summary>
 public sealed class ILSpyDecompilerService : IDecompilerService
 {
+    private static readonly ConcurrentDictionary<string, (DateTime LastWriteTime, CSharpDecompiler Decompiler, object SyncLock)> _decompilerCache = new();
     private readonly ILogger<ILSpyDecompilerService> _logger;
     private readonly DecompilerSettings _settings;
 
@@ -27,6 +29,22 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         };
     }
 
+    private (CSharpDecompiler Decompiler, object SyncLock) GetDecompiler(string assemblyPath)
+    {
+        var fullPath = Path.GetFullPath(assemblyPath);
+        var lastWriteTime = File.GetLastWriteTimeUtc(fullPath);
+
+        if (_decompilerCache.TryGetValue(fullPath, out var cached) && cached.LastWriteTime == lastWriteTime)
+        {
+            return (cached.Decompiler, cached.SyncLock);
+        }
+
+        var decompiler = new CSharpDecompiler(fullPath, _settings);
+        var lockObj = new object();
+        _decompilerCache[fullPath] = (lastWriteTime, decompiler, lockObj);
+        return (decompiler, lockObj);
+    }
+
     public async Task<DecompilationResult> DecompileTypeAsync(
         AssemblyPath assemblyPath,
         TypeName typeName,
@@ -36,14 +54,17 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         {
             try
             {
-                var decompiler = new CSharpDecompiler(assemblyPath.Value, _settings);
-                var type = decompiler.TypeSystem.MainModule.GetTypeDefinition(new FullTypeName(typeName.FullName));
-                
-                if (type == null)
-                    throw new TypeNotFoundException(typeName.FullName, assemblyPath.Value);
+                var (decompiler, lockObj) = GetDecompiler(assemblyPath.Value);
+                lock (lockObj)
+                {
+                    var type = decompiler.TypeSystem.MainModule.GetTypeDefinition(new FullTypeName(typeName.FullName));
+                    
+                    if (type == null)
+                        throw new TypeNotFoundException(typeName.FullName, assemblyPath.Value);
 
-                var code = decompiler.DecompileTypeAsString(type.FullTypeName);
-                return new DecompilationResult(code, typeName.FullName, assemblyPath.FileName);
+                    var code = decompiler.DecompileTypeAsString(type.FullTypeName);
+                    return new DecompilationResult(code, typeName.FullName, assemblyPath.FileName);
+                }
             }
             catch (TypeNotFoundException)
             {
@@ -67,26 +88,29 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         {
             try
             {
-                var decompiler = new CSharpDecompiler(assemblyPath.Value, _settings);
-                var type = decompiler.TypeSystem.MainModule.GetTypeDefinition(new FullTypeName(typeName.FullName));
-                
-                if (type == null)
-                    throw new TypeNotFoundException(typeName.FullName, assemblyPath.Value);
-
-                var methods = type.Methods.Where(m => m.Name == methodName).ToList();
-                if (!methods.Any())
-                    throw new MethodNotFoundException(methodName, typeName.FullName);
-
-                var codeBuilder = new System.Text.StringBuilder();
-                foreach (var method in methods)
+                var (decompiler, lockObj) = GetDecompiler(assemblyPath.Value);
+                lock (lockObj)
                 {
-                    var code = decompiler.DecompileAsString(method.MetadataToken);
-                    codeBuilder.AppendLine($"// Overload with {method.Parameters.Count} parameter(s)");
-                    codeBuilder.AppendLine(code);
-                    codeBuilder.AppendLine();
-                }
+                    var type = decompiler.TypeSystem.MainModule.GetTypeDefinition(new FullTypeName(typeName.FullName));
+                    
+                    if (type == null)
+                        throw new TypeNotFoundException(typeName.FullName, assemblyPath.Value);
 
-                return codeBuilder.ToString();
+                    var methods = type.Methods.Where(m => m.Name == methodName).ToList();
+                    if (!methods.Any())
+                        throw new MethodNotFoundException(methodName, typeName.FullName);
+
+                    var codeBuilder = new System.Text.StringBuilder();
+                    foreach (var method in methods)
+                    {
+                        var code = decompiler.DecompileAsString(method.MetadataToken);
+                        codeBuilder.AppendLine($"// Overload with {method.Parameters.Count} parameter(s)");
+                        codeBuilder.AppendLine(code);
+                        codeBuilder.AppendLine();
+                    }
+
+                    return codeBuilder.ToString();
+                }
             }
             catch (TypeNotFoundException)
             {
@@ -114,13 +138,16 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         {
             try
             {
-                var decompiler = new CSharpDecompiler(assemblyPath.Value, _settings);
-                var type = decompiler.TypeSystem.MainModule.GetTypeDefinition(new FullTypeName(typeName.FullName));
-                
-                if (type == null)
-                    throw new TypeNotFoundException(typeName.FullName, assemblyPath.Value);
+                var (decompiler, lockObj) = GetDecompiler(assemblyPath.Value);
+                lock (lockObj)
+                {
+                    var type = decompiler.TypeSystem.MainModule.GetTypeDefinition(new FullTypeName(typeName.FullName));
+                    
+                    if (type == null)
+                        throw new TypeNotFoundException(typeName.FullName, assemblyPath.Value);
 
-                return MapToTypeInfo(type);
+                    return MapToTypeInfo(type);
+                }
             }
             catch (TypeNotFoundException)
             {
@@ -144,19 +171,22 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         {
             try
             {
-                var decompiler = new CSharpDecompiler(assemblyPath.Value, _settings);
-                var mainModule = decompiler.TypeSystem.MainModule;
-                var types = mainModule.TypeDefinitions
-                    .Where(t => 
-                        // Only include types actually defined in this assembly (not type forwards)
-                        t.ParentModule == mainModule &&
-                        (string.IsNullOrEmpty(namespaceFilter) || 
-                         (t.Namespace?.Contains(namespaceFilter, StringComparison.OrdinalIgnoreCase) ?? false)))
-                    .Select(MapToTypeInfo)
-                    .OrderBy(t => t.FullName)
-                    .ToList();
+                var (decompiler, lockObj) = GetDecompiler(assemblyPath.Value);
+                lock (lockObj)
+                {
+                    var mainModule = decompiler.TypeSystem.MainModule;
+                    var types = mainModule.TypeDefinitions
+                        .Where(t => 
+                            // Only include types actually defined in this assembly (not type forwards)
+                            t.ParentModule == mainModule &&
+                            (string.IsNullOrEmpty(namespaceFilter) || 
+                             (t.Namespace?.Contains(namespaceFilter, StringComparison.OrdinalIgnoreCase) ?? false)))
+                        .Select(MapToTypeInfo)
+                        .OrderBy(t => t.FullName)
+                        .ToList();
 
-                return types;
+                    return types;
+                }
             }
             catch (Exception ex)
             {
@@ -174,29 +204,32 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         {
             try
             {
-                var decompiler = new CSharpDecompiler(assemblyPath.Value, _settings);
-                var mainModule = decompiler.TypeSystem.MainModule;
-                var publicTypes = mainModule.TypeDefinitions
-                    .Where(t => 
-                        // Only include types actually defined in this assembly (not type forwards)
-                        t.ParentModule == mainModule &&
-                        t.Accessibility == ICSharpCode.Decompiler.TypeSystem.Accessibility.Public)
-                    .Select(MapToTypeInfo)
-                    .Take(100)
-                    .ToList();
-
-                var namespaceCounts = publicTypes
-                    .GroupBy(t => t.Namespace ?? "(global)")
-                    .ToDictionary(g => g.Key, g => g.Count());
-
-                return new AssemblyInfo
+                var (decompiler, lockObj) = GetDecompiler(assemblyPath.Value);
+                lock (lockObj)
                 {
-                    FileName = assemblyPath.FileName,
-                    FullPath = assemblyPath.Value,
-                    PublicTypes = publicTypes,
-                    NamespaceCounts = namespaceCounts,
-                    TotalTypeCount = decompiler.TypeSystem.MainModule.TypeDefinitions.Count()
-                };
+                    var mainModule = decompiler.TypeSystem.MainModule;
+                    var publicTypes = mainModule.TypeDefinitions
+                        .Where(t => 
+                            // Only include types actually defined in this assembly (not type forwards)
+                            t.ParentModule == mainModule &&
+                            t.Accessibility == ICSharpCode.Decompiler.TypeSystem.Accessibility.Public)
+                        .Select(MapToTypeInfo)
+                        .Take(100)
+                        .ToList();
+
+                    var namespaceCounts = publicTypes
+                        .GroupBy(t => t.Namespace ?? "(global)")
+                        .ToDictionary(g => g.Key, g => g.Count());
+
+                    return new AssemblyInfo
+                    {
+                        FileName = assemblyPath.FileName,
+                        FullPath = assemblyPath.Value,
+                        PublicTypes = publicTypes,
+                        NamespaceCounts = namespaceCounts,
+                        TotalTypeCount = decompiler.TypeSystem.MainModule.TypeDefinitions.Count()
+                    };
+                }
             }
             catch (Exception ex)
             {
@@ -215,34 +248,37 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         {
             try
             {
-                var decompiler = new CSharpDecompiler(assemblyPath.Value, _settings);
-                var mainModule = decompiler.TypeSystem.MainModule;
-                var extensionMethods = new List<MethodInfo>();
-
-                foreach (var type in mainModule.TypeDefinitions
-                    .Where(t => 
-                        // Only include types actually defined in this assembly
-                        t.ParentModule == mainModule &&
-                        t.IsStatic && 
-                        t.Accessibility == ICSharpCode.Decompiler.TypeSystem.Accessibility.Public))
+                var (decompiler, lockObj) = GetDecompiler(assemblyPath.Value);
+                lock (lockObj)
                 {
-                    foreach (var method in type.Methods.Where(m => m.IsExtensionMethod))
+                    var mainModule = decompiler.TypeSystem.MainModule;
+                    var extensionMethods = new List<MethodInfo>();
+
+                    foreach (var type in mainModule.TypeDefinitions
+                        .Where(t => 
+                            // Only include types actually defined in this assembly
+                            t.ParentModule == mainModule &&
+                            t.IsStatic && 
+                            t.Accessibility == ICSharpCode.Decompiler.TypeSystem.Accessibility.Public))
                     {
-                        if (method.Parameters.Count > 0)
+                        foreach (var method in type.Methods.Where(m => m.IsExtensionMethod))
                         {
-                            var firstParam = method.Parameters[0];
-                            var extendsType = firstParam.Type.FullName;
-                            
-                            if (extendsType.Equals(targetType.FullName, StringComparison.OrdinalIgnoreCase) ||
-                                targetType.FullName.Contains(extendsType, StringComparison.OrdinalIgnoreCase))
+                            if (method.Parameters.Count > 0)
                             {
-                                extensionMethods.Add(MapToMethodInfo(method));
+                                var firstParam = method.Parameters[0];
+                                var extendsType = firstParam.Type.FullName;
+                                
+                                if (extendsType.Equals(targetType.FullName, StringComparison.OrdinalIgnoreCase) ||
+                                    targetType.FullName.Contains(extendsType, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    extensionMethods.Add(MapToMethodInfo(method));
+                                }
                             }
                         }
                     }
-                }
 
-                return extensionMethods;
+                    return extensionMethods;
+                }
             }
             catch (Exception ex)
             {
@@ -263,79 +299,82 @@ public sealed class ILSpyDecompilerService : IDecompilerService
         {
             try
             {
-                var decompiler = new CSharpDecompiler(assemblyPath.Value, _settings);
-                var mainModule = decompiler.TypeSystem.MainModule;
-                var results = new List<MemberSearchResult>();
-
-                foreach (var type in mainModule.TypeDefinitions
-                    .Where(t => 
-                        // Only include types actually defined in this assembly
-                        t.ParentModule == mainModule &&
-                        t.Accessibility == ICSharpCode.Decompiler.TypeSystem.Accessibility.Public))
+                var (decompiler, lockObj) = GetDecompiler(assemblyPath.Value);
+                lock (lockObj)
                 {
-                    if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("method", StringComparison.OrdinalIgnoreCase))
+                    var mainModule = decompiler.TypeSystem.MainModule;
+                    var results = new List<MemberSearchResult>();
+
+                    foreach (var type in mainModule.TypeDefinitions
+                        .Where(t => 
+                            // Only include types actually defined in this assembly
+                            t.ParentModule == mainModule &&
+                            t.Accessibility == ICSharpCode.Decompiler.TypeSystem.Accessibility.Public))
                     {
-                        foreach (var method in type.Methods
-                            .Where(m => m.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) && !m.IsConstructor))
+                        if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("method", StringComparison.OrdinalIgnoreCase))
                         {
-                            var parameters = string.Join(", ", method.Parameters.Select(p => $"{p.Type.Name} {p.Name}"));
-                            results.Add(new MemberSearchResult
+                            foreach (var method in type.Methods
+                                .Where(m => m.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) && !m.IsConstructor))
                             {
-                                TypeFullName = type.FullName,
-                                MemberName = method.Name,
-                                Kind = MemberKind.Method,
-                                Signature = $"{method.ReturnType.Name} {method.Name}({parameters})"
-                            });
+                                var parameters = string.Join(", ", method.Parameters.Select(p => $"{p.Type.Name} {p.Name}"));
+                                results.Add(new MemberSearchResult
+                                {
+                                    TypeFullName = type.FullName,
+                                    MemberName = method.Name,
+                                    Kind = MemberKind.Method,
+                                    Signature = $"{method.ReturnType.Name} {method.Name}({parameters})"
+                                });
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("property", StringComparison.OrdinalIgnoreCase))
+                        {
+                            foreach (var prop in type.Properties
+                                .Where(p => p.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                results.Add(new MemberSearchResult
+                                {
+                                    TypeFullName = type.FullName,
+                                    MemberName = prop.Name,
+                                    Kind = MemberKind.Property,
+                                    Signature = $"{prop.ReturnType.Name} {prop.Name}"
+                                });
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("field", StringComparison.OrdinalIgnoreCase))
+                        {
+                            foreach (var field in type.Fields
+                                .Where(f => f.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                results.Add(new MemberSearchResult
+                                {
+                                    TypeFullName = type.FullName,
+                                    MemberName = field.Name,
+                                    Kind = MemberKind.Field,
+                                    Signature = $"{field.Type.Name} {field.Name}"
+                                });
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("event", StringComparison.OrdinalIgnoreCase))
+                        {
+                            foreach (var evt in type.Events
+                                .Where(e => e.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                results.Add(new MemberSearchResult
+                                {
+                                    TypeFullName = type.FullName,
+                                    MemberName = evt.Name,
+                                    Kind = MemberKind.Event,
+                                    Signature = $"event {evt.ReturnType.Name} {evt.Name}"
+                                });
+                            }
                         }
                     }
 
-                    if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("property", StringComparison.OrdinalIgnoreCase))
-                    {
-                        foreach (var prop in type.Properties
-                            .Where(p => p.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            results.Add(new MemberSearchResult
-                            {
-                                TypeFullName = type.FullName,
-                                MemberName = prop.Name,
-                                Kind = MemberKind.Property,
-                                Signature = $"{prop.ReturnType.Name} {prop.Name}"
-                            });
-                        }
-                    }
-
-                    if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("field", StringComparison.OrdinalIgnoreCase))
-                    {
-                        foreach (var field in type.Fields
-                            .Where(f => f.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            results.Add(new MemberSearchResult
-                            {
-                                TypeFullName = type.FullName,
-                                MemberName = field.Name,
-                                Kind = MemberKind.Field,
-                                Signature = $"{field.Type.Name} {field.Name}"
-                            });
-                        }
-                    }
-
-                    if (string.IsNullOrEmpty(memberKind) || memberKind.Equals("event", StringComparison.OrdinalIgnoreCase))
-                    {
-                        foreach (var evt in type.Events
-                            .Where(e => e.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            results.Add(new MemberSearchResult
-                            {
-                                TypeFullName = type.FullName,
-                                MemberName = evt.Name,
-                                Kind = MemberKind.Event,
-                                Signature = $"event {evt.ReturnType.Name} {evt.Name}"
-                            });
-                        }
-                    }
+                    return results;
                 }
-
-                return results;
             }
             catch (Exception ex)
             {
