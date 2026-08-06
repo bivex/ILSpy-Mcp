@@ -68,3 +68,6 @@ artifacts/
 # JetBrains Rider
 .idea/
 *.sln.iml
+trace*.json
+nupkg/
+*.speedscope*
