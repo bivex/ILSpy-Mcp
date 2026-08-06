@@ -34,9 +34,7 @@ public sealed class FindTypeHierarchyUseCase
 
             _logger.LogInformation("Finding hierarchy for type {TypeName} in {Assembly}", typeName, assemblyPath);
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, 
-                _timeout.CreateTimeoutToken());
+            using var timeoutCts = _timeout.CreateLinkedTimeout(cancellationToken);
 
             var typeInfo = await _decompiler.GetTypeInfoAsync(assembly, type, timeoutCts.Token);
 
@@ -46,7 +44,7 @@ public sealed class FindTypeHierarchyUseCase
             result.AppendLine();
 
             result.AppendLine("Inherits from:");
-            if (typeInfo.BaseTypes.Any())
+            if (typeInfo.BaseTypes.Count > 0)
             {
                 foreach (var baseType in typeInfo.BaseTypes)
                 {
@@ -60,7 +58,7 @@ public sealed class FindTypeHierarchyUseCase
             result.AppendLine();
 
             result.AppendLine("Implements interfaces:");
-            if (typeInfo.Interfaces.Any())
+            if (typeInfo.Interfaces.Count > 0)
             {
                 foreach (var iface in typeInfo.Interfaces)
                 {

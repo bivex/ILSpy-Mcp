@@ -23,7 +23,7 @@ public interface IDecompilerService
         TypeName typeName,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<TypeInfo>> ListTypesAsync(
+    Task<IReadOnlyList<TypeSummary>> ListTypesAsync(
         AssemblyPath assemblyPath,
         string? namespaceFilter = null,
         CancellationToken cancellationToken = default);

@@ -34,9 +34,7 @@ public sealed class ListAssemblyTypesUseCase
             _logger.LogInformation("Listing types from {Assembly} with filter: {Filter}", 
                 assemblyPath, namespaceFilter ?? "none");
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, 
-                _timeout.CreateTimeoutToken());
+            using var timeoutCts = _timeout.CreateLinkedTimeout(cancellationToken);
 
             var types = await _decompiler.ListTypesAsync(assembly, namespaceFilter, timeoutCts.Token);
 
@@ -47,7 +45,15 @@ public sealed class ListAssemblyTypesUseCase
 
             foreach (var type in types)
             {
-                var kind = type.Kind.ToString().ToLower();
+                var kind = type.Kind switch
+                {
+                    Domain.Models.TypeKind.Class     => "class",
+                    Domain.Models.TypeKind.Interface => "interface",
+                    Domain.Models.TypeKind.Struct    => "struct",
+                    Domain.Models.TypeKind.Enum      => "enum",
+                    Domain.Models.TypeKind.Delegate  => "delegate",
+                    _                                => "unknown"
+                };
                 result.AppendLine($"  {kind,-10} {type.FullName}");
             }
 

@@ -7,7 +7,7 @@ public sealed record AssemblyInfo
 {
     public required string FileName { get; init; }
     public required string FullPath { get; init; }
-    public IReadOnlyList<TypeInfo> PublicTypes { get; init; } = Array.Empty<TypeInfo>();
+    public IReadOnlyList<TypeSummary> PublicTypes { get; init; } = Array.Empty<TypeSummary>();
     public IReadOnlyDictionary<string, int> NamespaceCounts { get; init; } = new Dictionary<string, int>();
     public int TotalTypeCount { get; init; }
 }

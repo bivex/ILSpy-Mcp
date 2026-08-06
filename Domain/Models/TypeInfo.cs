@@ -18,6 +18,19 @@ public sealed record TypeInfo
     public IReadOnlyList<string> Interfaces { get; init; } = Array.Empty<string>();
 }
 
+/// <summary>
+/// Lightweight type summary — only FullName, Namespace, Kind, Accessibility.
+/// Used by ListTypes and AnalyzeAssembly to avoid full member mapping overhead.
+/// </summary>
+public sealed record TypeSummary
+{
+    public required string FullName { get; init; }
+    public string? Namespace { get; init; }
+    public required string ShortName { get; init; }
+    public TypeKind Kind { get; init; }
+    public Accessibility Accessibility { get; init; }
+}
+
 public enum TypeKind
 {
     Class,

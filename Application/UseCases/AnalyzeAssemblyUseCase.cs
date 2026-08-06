@@ -34,9 +34,7 @@ public sealed class AnalyzeAssemblyUseCase
 
             _logger.LogInformation("Analyzing assembly {Assembly}", assemblyPath);
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, 
-                _timeout.CreateTimeoutToken());
+            using var timeoutCts = _timeout.CreateLinkedTimeout(cancellationToken);
 
             var assemblyInfo = await _decompiler.GetAssemblyInfoAsync(assembly, timeoutCts.Token);
 
@@ -47,9 +45,10 @@ public sealed class AnalyzeAssemblyUseCase
             result.AppendLine($"Public Types: {assemblyInfo.PublicTypes.Count}");
             result.AppendLine();
 
-            if (assemblyInfo.NamespaceCounts.Any())
+            if (assemblyInfo.NamespaceCounts.Count > 0)
             {
                 result.AppendLine("Namespaces:");
+                // TODO: NamespaceCounts is built in a single pass; consider pre-sorting at construction time
                 foreach (var ns in assemblyInfo.NamespaceCounts.OrderByDescending(kvp => kvp.Value))
                 {
                     result.AppendLine($"  {ns.Key}: {ns.Value} types");
@@ -57,7 +56,7 @@ public sealed class AnalyzeAssemblyUseCase
                 result.AppendLine();
             }
 
-            if (assemblyInfo.PublicTypes.Any())
+            if (assemblyInfo.PublicTypes.Count > 0)
             {
                 result.AppendLine("Key Public Types:");
                 foreach (var type in assemblyInfo.PublicTypes)

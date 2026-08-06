@@ -37,9 +37,7 @@ public sealed class DecompileMethodUseCase
             _logger.LogInformation("Decompiling method {MethodName} from {TypeName} in {Assembly}", 
                 methodName, typeName, assemblyPath);
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, 
-                _timeout.CreateTimeoutToken());
+            using var timeoutCts = _timeout.CreateLinkedTimeout(cancellationToken);
 
             var methodCode = await _decompiler.DecompileMethodAsync(assembly, type, methodName, timeoutCts.Token);
 

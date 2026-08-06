@@ -35,9 +35,7 @@ public sealed class FindExtensionMethodsUseCase
             _logger.LogInformation("Finding extension methods for {TypeName} in {Assembly}", 
                 targetTypeName, assemblyPath);
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, 
-                _timeout.CreateTimeoutToken());
+            using var timeoutCts = _timeout.CreateLinkedTimeout(cancellationToken);
 
             var extensionMethods = await _decompiler.FindExtensionMethodsAsync(assembly, targetType, timeoutCts.Token);
 
@@ -46,7 +44,7 @@ public sealed class FindExtensionMethodsUseCase
             result.AppendLine($"Assembly: {assembly.FileName}");
             result.AppendLine();
 
-            if (extensionMethods.Any())
+            if (extensionMethods.Count > 0)
             {
                 result.AppendLine($"Found {extensionMethods.Count} extension methods:");
                 result.AppendLine();

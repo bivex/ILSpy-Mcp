@@ -35,9 +35,7 @@ public sealed class SearchMembersByNameUseCase
             _logger.LogInformation("Searching members in {Assembly} for '{SearchTerm}' (kind: {Kind})", 
                 assemblyPath, searchTerm, memberKind ?? "any");
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, 
-                _timeout.CreateTimeoutToken());
+            using var timeoutCts = _timeout.CreateLinkedTimeout(cancellationToken);
 
             var results = await _decompiler.SearchMembersAsync(assembly, searchTerm, memberKind, timeoutCts.Token);
 

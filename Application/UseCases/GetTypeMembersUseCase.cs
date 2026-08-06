@@ -34,9 +34,7 @@ public sealed class GetTypeMembersUseCase
 
             _logger.LogInformation("Getting members for type {TypeName} from {Assembly}", typeName, assemblyPath);
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, 
-                _timeout.CreateTimeoutToken());
+            using var timeoutCts = _timeout.CreateLinkedTimeout(cancellationToken);
 
             var typeInfo = await _decompiler.GetTypeInfoAsync(assembly, type, timeoutCts.Token);
 
@@ -48,30 +46,29 @@ public sealed class GetTypeMembersUseCase
             result.AppendLine($"╚═══");
             result.AppendLine();
 
-            if (typeInfo.Methods.Any())
+            if (typeInfo.Methods.Count > 0)
             {
                 result.AppendLine("Methods:");
                 foreach (var method in typeInfo.Methods)
                 {
-                    var accessibility = method.Accessibility.ToString().ToLower();
-                    var modifiers = new List<string>();
-                    if (method.IsStatic) modifiers.Add("static");
-                    if (method.IsAbstract) modifiers.Add("abstract");
-                    if (method.IsVirtual) modifiers.Add("virtual");
-                    
+                    var accessibility = AccessibilityLabel(method.Accessibility);
+                    var mods = method.IsStatic && method.IsAbstract ? "static abstract "
+                        : method.IsStatic ? "static "
+                        : method.IsAbstract ? "abstract "
+                        : method.IsVirtual ? "virtual "
+                        : "";
                     var parameters = string.Join(", ", method.Parameters.Select(p => $"{p.Type} {p.Name}"));
-                    var mods = modifiers.Any() ? string.Join(" ", modifiers) + " " : "";
                     result.AppendLine($"  {accessibility} {mods}{method.ReturnType} {method.Name}({parameters})");
                 }
                 result.AppendLine();
             }
 
-            if (typeInfo.Properties.Any())
+            if (typeInfo.Properties.Count > 0)
             {
                 result.AppendLine("Properties:");
                 foreach (var prop in typeInfo.Properties)
                 {
-                    var accessibility = prop.Accessibility.ToString().ToLower();
+                    var accessibility = AccessibilityLabel(prop.Accessibility);
                     var getter = prop.HasGetter ? "get;" : "";
                     var setter = prop.HasSetter ? "set;" : "";
                     result.AppendLine($"  {accessibility} {prop.Type} {prop.Name} {{ {getter} {setter} }}");
@@ -79,24 +76,24 @@ public sealed class GetTypeMembersUseCase
                 result.AppendLine();
             }
 
-            if (typeInfo.Fields.Any())
+            if (typeInfo.Fields.Count > 0)
             {
                 result.AppendLine("Fields:");
                 foreach (var field in typeInfo.Fields)
                 {
-                    var accessibility = field.Accessibility.ToString().ToLower();
+                    var accessibility = AccessibilityLabel(field.Accessibility);
                     var modifiers = field.IsStatic ? "static " : "";
                     result.AppendLine($"  {accessibility} {modifiers}{field.Type} {field.Name}");
                 }
                 result.AppendLine();
             }
 
-            if (typeInfo.Events.Any())
+            if (typeInfo.Events.Count > 0)
             {
                 result.AppendLine("Events:");
                 foreach (var evt in typeInfo.Events)
                 {
-                    var accessibility = evt.Accessibility.ToString().ToLower();
+                    var accessibility = AccessibilityLabel(evt.Accessibility);
                     result.AppendLine($"  {accessibility} event {evt.Type} {evt.Name}");
                 }
             }
@@ -123,4 +120,15 @@ public sealed class GetTypeMembersUseCase
             throw;
         }
     }
+
+    private static string AccessibilityLabel(Domain.Models.Accessibility a) => a switch
+    {
+        Domain.Models.Accessibility.Public           => "public",
+        Domain.Models.Accessibility.Internal         => "internal",
+        Domain.Models.Accessibility.Protected        => "protected",
+        Domain.Models.Accessibility.Private          => "private",
+        Domain.Models.Accessibility.ProtectedInternal  => "protected internal",
+        Domain.Models.Accessibility.PrivateProtected   => "private protected",
+        _                                            => a.ToString().ToLower()
+    };
 }
