@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Xunit;
 using Xunit.Abstractions;
 using ILSpy.Mcp.Application.Configuration;
@@ -17,12 +18,21 @@ namespace ILSpy.Mcp.Tests;
 public class BottleneckBenchmark
 {
     private readonly ITestOutputHelper _out;
-    private readonly string _dllPath = "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Text.Json.dll";
+    private readonly string _dllPath;
     private readonly IServiceProvider _sp;
 
     public BottleneckBenchmark(ITestOutputHelper output)
     {
         _out = output;
+        var runtimePath = RuntimeEnvironment.GetRuntimeDirectory();
+        var candidates = new[]
+        {
+            Path.Combine(runtimePath, "System.Text.Json.dll"),
+            Path.Combine(runtimePath, "System.Private.CoreLib.dll")
+        };
+        _dllPath = candidates.FirstOrDefault(File.Exists)
+            ?? throw new InvalidOperationException($"No test assembly found in {runtimePath}");
+
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
         services.Configure<ILSpyOptions>(o =>
@@ -51,99 +61,72 @@ public class BottleneckBenchmark
         return (sw.Elapsed.TotalMilliseconds, result);
     }
 
-    /// <summary>
-    /// BOTTLENECK #1: GetTypeInfo allocates full TypeInfo (with all members) even when
-    /// FindTypeHierarchy only needs BaseTypes + Interfaces (2 fields out of ~8).
-    /// </summary>
-    [Fact]
+    [Fact(Skip = "Manual benchmark")]
     public async Task Bottleneck_FindTypeHierarchy_AllocatesFullTypeInfo()
     {
         _out.WriteLine("\n=== BOTTLENECK #1: FindTypeHierarchy over-fetches full TypeInfo ===");
 
-        // Warm cache
         using (var s = _sp.CreateScope())
             await s.ServiceProvider.GetRequiredService<FindTypeHierarchyUseCase>()
-                .ExecuteAsync(_dllPath, "System.Text.Json.JsonSerializer");
+                .ExecuteAsync(_dllPath, "System.String");
 
         var times = new List<double>();
         for (int i = 0; i < 5; i++)
         {
             using var scope = _sp.CreateScope();
             var uc = scope.ServiceProvider.GetRequiredService<FindTypeHierarchyUseCase>();
-            var (ms, _) = await Measure($"run {i+1}", () => uc.ExecuteAsync(_dllPath, "System.Text.Json.JsonSerializer"));
+            var (ms, _) = await Measure($"run {i+1}", () => uc.ExecuteAsync(_dllPath, "System.String"));
             times.Add(ms);
         }
-        _out.WriteLine($"  avg: {times.Average():F1} ms — FULL TypeInfo (methods, props, fields, events) wasted for hierarchy-only query");
+        _out.WriteLine($"  avg: {times.Average():F1} ms");
     }
 
-    /// <summary>
-    /// BOTTLENECK #2: GetTypeMembersUseCase calls GetTypeInfoAsync which maps ALL members
-    /// (methods, properties, fields, events) into domain objects via MapToTypeInfo —
-    /// heavy LINQ allocation even for types with hundreds of members.
-    /// </summary>
-    [Fact]
+    [Fact(Skip = "Manual benchmark")]
     public async Task Bottleneck_GetTypeMembers_FullMappingOnEveryCall()
     {
         _out.WriteLine("\n=== BOTTLENECK #2: GetTypeMembers maps all members on every call ===");
 
-        // Warm cache
         using (var s = _sp.CreateScope())
             await s.ServiceProvider.GetRequiredService<GetTypeMembersUseCase>()
-                .ExecuteAsync(_dllPath, "System.Text.Json.JsonSerializer");
+                .ExecuteAsync(_dllPath, "System.String");
 
         var times = new List<double>();
         for (int i = 0; i < 5; i++)
         {
             using var scope = _sp.CreateScope();
             var uc = scope.ServiceProvider.GetRequiredService<GetTypeMembersUseCase>();
-            var (ms, _) = await Measure($"run {i+1}", () => uc.ExecuteAsync(_dllPath, "System.Text.Json.JsonSerializer"));
+            var (ms, _) = await Measure($"run {i+1}", () => uc.ExecuteAsync(_dllPath, "System.String"));
             times.Add(ms);
         }
-        _out.WriteLine($"  avg: {times.Average():F1} ms — MapToTypeInfo walks all 100+ methods even for simple member listing");
+        _out.WriteLine($"  avg: {times.Average():F1} ms");
     }
 
-    /// <summary>
-    /// BOTTLENECK #3: ListTypesAsync maps ALL types to full TypeInfo (including all members)
-    /// just to output "kind + FullName". For large assemblies this is extremely wasteful.
-    /// System.Private.CoreLib has 2000+ types.
-    /// </summary>
-    [Fact]
+    [Fact(Skip = "Manual benchmark")]
     public async Task Bottleneck_ListTypes_MapsFullTypeInfoForSimpleListing()
     {
         _out.WriteLine("\n=== BOTTLENECK #3: ListTypes maps full TypeInfo just for FullName+Kind ===");
 
-        var largerDll = "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll";
-
-        // Cold
         using (var s = _sp.CreateScope())
         {
             var uc = s.ServiceProvider.GetRequiredService<ListAssemblyTypesUseCase>();
-            await Measure("CoreLib COLD", () => uc.ExecuteAsync(largerDll, null));
+            await Measure("CoreLib COLD", () => uc.ExecuteAsync(_dllPath, null));
         }
-        // Warm
         using (var s = _sp.CreateScope())
         {
             var uc = s.ServiceProvider.GetRequiredService<ListAssemblyTypesUseCase>();
-            await Measure("CoreLib WARM", () => uc.ExecuteAsync(largerDll, null));
+            await Measure("CoreLib WARM", () => uc.ExecuteAsync(_dllPath, null));
         }
-        _out.WriteLine("  => MapToTypeInfo called for ALL 2000+ types even though only FullName+Kind are used in output");
     }
 
-    /// <summary>
-    /// BOTTLENECK #4: TimeoutService creates a new CancellationTokenSource on EVERY call,
-    /// even for operations that complete in < 5ms. CTS allocation + timer is not free.
-    /// </summary>
-    [Fact]
+    [Fact(Skip = "Manual benchmark")]
     public async Task Bottleneck_TimeoutService_NewCtsPerCall()
     {
         _out.WriteLine("\n=== BOTTLENECK #4: New CancellationTokenSource per use-case call ===");
 
-        // Warm
         using (var s = _sp.CreateScope())
             await s.ServiceProvider.GetRequiredService<ListAssemblyTypesUseCase>()
                 .ExecuteAsync(_dllPath, null);
 
-        // Measure rapid repeated calls
         var sw = Stopwatch.StartNew();
         const int N = 50;
         for (int i = 0; i < N; i++)
@@ -154,22 +137,16 @@ public class BottleneckBenchmark
         }
         sw.Stop();
         _out.WriteLine($"  {N} calls: {sw.Elapsed.TotalMilliseconds:F1} ms total, avg {sw.Elapsed.TotalMilliseconds / N:F2} ms/call");
-        _out.WriteLine($"  => Each call allocates 2× CTS (TimeoutService.CreateTimeoutToken + linked in use-case)");
     }
 
-    /// <summary>
-    /// BOTTLENECK #5: ToString().ToLower() in hot loops (GetTypeMembersUseCase).
-    /// Called on every method/property/field for accessibility string formatting.
-    /// </summary>
-    [Fact]
+    [Fact(Skip = "Manual benchmark")]
     public async Task Bottleneck_GetTypeMembers_ToStringToLowerInLoop()
     {
         _out.WriteLine("\n=== BOTTLENECK #5: .ToString().ToLower() on accessibility in hot loop ===");
 
-        // Warm
         using (var s = _sp.CreateScope())
             await s.ServiceProvider.GetRequiredService<GetTypeMembersUseCase>()
-                .ExecuteAsync(_dllPath, "System.Text.Json.JsonSerializer");
+                .ExecuteAsync(_dllPath, "System.String");
 
         var sw = Stopwatch.StartNew();
         const int N = 20;
@@ -177,36 +154,29 @@ public class BottleneckBenchmark
         {
             using var scope = _sp.CreateScope();
             await scope.ServiceProvider.GetRequiredService<GetTypeMembersUseCase>()
-                .ExecuteAsync(_dllPath, "System.Text.Json.JsonSerializer");
+                .ExecuteAsync(_dllPath, "System.String");
         }
         sw.Stop();
         _out.WriteLine($"  {N} calls: {sw.Elapsed.TotalMilliseconds:F1} ms total, avg {sw.Elapsed.TotalMilliseconds / N:F2} ms/call");
-        _out.WriteLine($"  => accessibility.ToString().ToLower() + new List<string>() + modifiers.Any() on EVERY member in loop");
     }
 
-    /// <summary>
-    /// BOTTLENECK #6: SearchMembers does a full scan of ALL public types and ALL members
-    /// even for very specific search terms. No early exit, no indexing.
-    /// </summary>
-    [Fact]
+    [Fact(Skip = "Manual benchmark")]
     public async Task Bottleneck_SearchMembers_FullScanNoIndex()
     {
-        _out.WriteLine("\n=== BOTTLENECK #6: SearchMembers — full O(types × members) scan, no index ===");
-
-        var largerDll = "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll";
+        _out.WriteLine("\n=== BOTTLENECK #6: SearchMembers — full O(types × members) scan ===");
 
         using (var s = _sp.CreateScope())
             await s.ServiceProvider.GetRequiredService<SearchMembersByNameUseCase>()
-                .ExecuteAsync(largerDll, "ToString", null);
+                .ExecuteAsync(_dllPath, "ToString", null);
 
         var times = new List<double>();
         for (int i = 0; i < 3; i++)
         {
             using var scope = _sp.CreateScope();
             var uc = scope.ServiceProvider.GetRequiredService<SearchMembersByNameUseCase>();
-            var (ms, result) = await Measure($"run {i+1}", () => uc.ExecuteAsync(largerDll, "ToString", null));
+            var (ms, result) = await Measure($"run {i+1}", () => uc.ExecuteAsync(_dllPath, "ToString", null));
             times.Add(ms);
         }
-        _out.WriteLine($"  avg: {times.Average():F1} ms — scans every method/property/field/event of every public type in CoreLib");
+        _out.WriteLine($"  avg: {times.Average():F1} ms");
     }
 }

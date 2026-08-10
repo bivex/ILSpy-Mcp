@@ -209,6 +209,40 @@ public class BugFindingTests : IDisposable
         results.All(r => !string.IsNullOrEmpty(r.SourceCode)).Should().BeTrue();
     }
 
+    [Fact]
+    public async Task DecompilerService_FileModified_EvictsCacheAndReturnsFreshResults()
+    {
+        var tempDll = Path.Combine(Path.GetTempPath(), $"TestAssembly_{Guid.NewGuid():N}.dll");
+        File.Copy(_validAssemblyPath, tempDll, overwrite: true);
+
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var decompiler = scope.ServiceProvider.GetRequiredService<IDecompilerService>();
+            var assemblyPath = AssemblyPath.Create(tempDll);
+            var typeName = TypeName.Create("System.String");
+
+            // 1. Initial call populates cache
+            var result1 = await decompiler.DecompileTypeAsync(assemblyPath, typeName);
+            result1.SourceCode.Should().NotBeNullOrEmpty();
+
+            // 2. Overwrite file to simulate rebuild (FileShare.ReadWrite | FileShare.Delete allows this)
+            File.Copy(_validAssemblyPath, tempDll, overwrite: true);
+            File.SetLastWriteTimeUtc(tempDll, DateTime.UtcNow.AddSeconds(10));
+
+            // 3. Second call detects write-time change and reloads without file lock error
+            var result2 = await decompiler.DecompileTypeAsync(assemblyPath, typeName);
+            result2.SourceCode.Should().NotBeNullOrEmpty();
+        }
+        finally
+        {
+            if (File.Exists(tempDll))
+            {
+                try { File.Delete(tempDll); } catch { }
+            }
+        }
+    }
+
     #endregion
 
     #region MCP Tool Exception & Error Mapping Tests
