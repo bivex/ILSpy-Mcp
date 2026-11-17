@@ -4,7 +4,7 @@ This guide explains how to connect the ILSpy MCP server to various MCP clients.
 
 ## Prerequisites
 
-- .NET 9.0 SDK installed
+- .NET 10.0 SDK installed
 - An MCP-compatible client (Claude Code, Cursor, Claude Desktop)
 
 ## Installation
@@ -128,7 +128,7 @@ decompile_type(
 
 ### Server Not Starting
 
-- Verify .NET 9.0 SDK is installed: `dotnet --version`
+- Verify .NET 10.0 SDK is installed: `dotnet --version`
 - Verify the tool is installed: `dotnet tool list -g | grep ILSpyMcp`
 - Try reinstalling: `dotnet tool uninstall -g ILSpyMcp.Server && dotnet tool install -g ILSpyMcp.Server`
 
