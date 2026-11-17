@@ -6,7 +6,7 @@
 [![MCP Protocol](https://img.shields.io/badge/MCP-Standard-0052CC?style=flat-square)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
-A Model Context Protocol (MCP) server built on .NET 9 that provides in-memory .NET assembly decompilation and structural analysis capabilities for AI assistants using [ILSpy (`ICSharpCode.Decompiler`)](https://github.com/icsharpcode/ILSpy).
+A Model Context Protocol (MCP) server built on .NET 10 that provides in-memory .NET assembly decompilation and structural analysis capabilities for AI assistants using [ILSpy (`ICSharpCode.Decompiler`)](https://github.com/icsharpcode/ILSpy).
 
 ---
 
@@ -99,7 +99,7 @@ For best results when analyzing unfamiliar .NET libraries or assemblies, AI assi
 
 ### Prerequisites
 
-- **.NET 9.0 SDK** or higher
+- **.NET 10.0 SDK** or higher
 - An MCP-compatible client (Claude Code, Cursor, Antigravity, Claude Desktop, VS Code, etc.)
 
 ---
@@ -137,7 +137,7 @@ You can then run the built DLL directly in your MCP client settings:
   "mcpServers": {
     "ilspy-mcp": {
       "command": "dotnet",
-      "args": ["/path/to/ILSpy-Mcp/bin/Release/net9.0/ILSpy.Mcp.dll"]
+      "args": ["/path/to/ILSpy-Mcp/bin/Release/net10.0/ILSpy.Mcp.dll"]
     }
   }
 }
